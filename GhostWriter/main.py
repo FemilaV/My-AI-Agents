@@ -10,7 +10,7 @@ from agents import researcher_agent, editor_agent, writer_agent
 # -----------------------------
 def should_revise(state: AgentState) -> bool:
     """
-    Content will not be revise.
+    Content will not be revised.
     """
     return state["revision_count"] < 1
 
