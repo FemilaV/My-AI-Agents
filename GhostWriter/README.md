@@ -47,14 +47,14 @@ This minimizes cost while maintaining output quality.
 
 ---
 
-## ⏱️ Performance (Typical Run)
+## ⏱️ Performance (Typical Run in CPU-bound environment)
 
 | Stage | Time |
 |----|----|
-| Research | ~3.5 minutes |
-| Writing | ~2.3 minutes |
-| Editing | ~6 seconds |
-| **Total** | **~5–6 minutes** |
+| Research | ~2.5-3 minutes |
+| Writing | ~1.5-2 minutes |
+| Editing | ~5-6 seconds |
+| **Total** | **~4.5–5 minutes** |
 
 ---
 
