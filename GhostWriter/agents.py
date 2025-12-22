@@ -68,7 +68,7 @@ def researcher_agent(state):
         r["url"]
         for r in search_results
         if isinstance(r, dict) and "url" in r
-    ][:3]  # hard limit for speed
+    ][:2]  # hard limit for speed
 
     print(f"Found {len(urls)} URLs")
 
