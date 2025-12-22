@@ -9,7 +9,7 @@ The project is designed with **cost efficiency, performance instrumentation, and
 
 ## 🚀 Features
 
-- 🔍 Web research using Tavily Search + Crawl4AI
+- 🔍 Web research using Tavily Search + httpx and beautifulsoup
 - 🧠 Multi-agent architecture (Researcher → Writer → Editor)
 - ⚡ Cost-aware LLM routing
 - ⏱️ End-to-end performance timing
@@ -20,37 +20,18 @@ The project is designed with **cost efficiency, performance instrumentation, and
 
 ## 🧠 Architecture Overview
 
+GhostWriter follows a linear multi-agent workflow designed to balance speed, cost, and output quality.
+The system follows a linear, deterministic pipeline, making it reliable, debuggable, and production-friendly.
+
 User Topic
-   │
-   ▼
-┌──────────────────────┐
-│   Researcher Agent   │
-│  (Tavily + Crawl4AI) │
-└─────────┬────────────┘
-          │
-          ▼
-┌──────────────────────────────┐
-│ Fast Local LLM (phi-3 mini)  │
-│ • Summarize research         │
-│ • Generate blog outline      │
-└─────────┬────────────────────┘
-          │
-          ▼
-┌──────────────────────────────┐
-│ Writer Agent (Local LLM)     │
-│ llama3.2 via Ollama          │
-│ • Full blog generation       │
-└─────────┬────────────────────┘
-          │
-          ▼
-┌──────────────────────────────┐
-│ Final Editor Agent (OpenAI)  │
-│ GPT-4o (single paid call)    │
-│ • Grammar, clarity, polish   │
-└─────────┬────────────────────┘
-          │
-          ▼
-     Final Blog Output
+   ↓
+Researcher Agent (phi3:mini)
+   ↓
+Writer Agent (llama3.2)
+   ↓
+Editor Agent (gpt-4o)
+   ↓
+Final Blog Post
 
 ---
 
@@ -83,7 +64,8 @@ This minimizes cost while maintaining output quality.
 - LangChain
 - Ollama (local LLMs)
 - Tavily Search API
-- Crawl4AI
+- httpx
+- beautifulsoup   
 - OpenAI API
 
 ---
