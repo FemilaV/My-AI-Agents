@@ -1,3 +1,8 @@
+"""
+This module handles integration with the Google Calendar API.
+It fetches upcoming calendar events to provide context for the Health Twin agent.
+"""
+
 import os.path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -8,6 +13,10 @@ import datetime
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
 def get_upcoming_events():
+    """
+    Authenticates with Google Calendar and fetches the next 5 upcoming events.
+    Returns a formatted string of events or a 'not found' message.
+    """
     creds = None
     # token.json stores the user's access and refresh tokens
     if os.path.exists('token.json'):

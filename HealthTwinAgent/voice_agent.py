@@ -1,3 +1,9 @@
+"""
+This module implements the real-time voice agent for the Health Twin.
+It connects to LiveKit, uses Groq for LLM reasoning, Deepgram for STT,
+and OpenAI for TTS. It integrates user health state and calendar data.
+"""
+
 import os
 import asyncio
 import json
@@ -12,6 +18,11 @@ logger = logging.getLogger("health-twin")
 load_dotenv()
 
 async def entrypoint(ctx: JobContext):
+    """
+    Main entrypoint for the LiveKit agent.
+    Performs initial connection, loads user state, fetches calendar events,
+    configures the voice agent with dynamic instructions, and starts the session.
+    """
     await ctx.connect()
     
     # 1. Load User State

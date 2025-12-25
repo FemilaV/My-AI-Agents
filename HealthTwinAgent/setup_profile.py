@@ -1,13 +1,20 @@
+"""
+This module handles the initial user profile setup for the Health Twin.
+It calculates base metabolic rates and targets, and initializes the state.json file.
+"""
+
 import json
 import os
 
 def calculate_daily_target(weight, height, age, activity_level):
+    """Calculates the daily calorie target using the Mifflin-St Jeor equation."""
     # BMR Calculation (Mifflin-St Jeor)
     bmr = (10 * weight) + (6.25 * height) - (5 * age) - 161 
     multipliers = {"sedentary": 1.2, "light": 1.375, "moderate": 1.55, "active": 1.725}
     return int(bmr * multipliers.get(activity_level, 1.2))
 
 def create_new_profile():
+    """Prompts the user for health data and creates a new state.json profile."""
     print("\n--- 🧬 HEALTH TWIN USER SETUP ---")
     name = input("Enter your name: ")
     weight = float(input("Weight (kg): "))
@@ -19,7 +26,6 @@ def create_new_profile():
     bmi = round(weight / ((height/100)**2), 1)
     target = calculate_daily_target(weight, height, age, activity)
 
-    # NEW SCHEMA: Added all missing keys to avoid KeyError
     profile = {
         "user_profile": {
             "name": name, 

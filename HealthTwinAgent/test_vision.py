@@ -1,3 +1,8 @@
+"""
+This module handles the vision analysis of meal images using Groq's multimodal models.
+It extracts nutritional information (calories, macros, etc.) and updates the shared state.json.
+"""
+
 import os
 import json
 import base64
@@ -8,10 +13,15 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def encode_image(image_path):
+    """Encodes an image file to a base64 string."""
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 def analyze_meal(image_path="meal.jpg"):
+    """
+    Analyzes a meal image using a vision model.
+    Parses the JSON response and updates state.json with new nutrient totals.
+    """
     print(f"📸 Analyzing {image_path}...")
     base64_image = encode_image(image_path)
 
@@ -28,7 +38,7 @@ def analyze_meal(image_path="meal.jpg"):
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
             ]
         }],
-        model="llama-3.2-11b-vision-preview", 
+        model="meta-llama/llama-4-scout-17b-16e-instruct", 
     )
 
     # Parse the response

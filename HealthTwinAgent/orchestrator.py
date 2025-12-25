@@ -1,3 +1,8 @@
+"""
+This module acts as an orchestration layer, combining meal data and calendar events
+to generate high-level coaching advice using Groq's LLM.
+"""
+
 import os
 from groq import Groq
 from dotenv import load_dotenv
@@ -6,6 +11,10 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def get_coach_advice(meal_macros, upcoming_events):
+    """
+    Combines meal macros and upcoming events to generate proactive health advice.
+    Uses the llama-3.3-70b-versatile model for reasoning.
+    """
     prompt = f"""
     You are a Personal Health Twin. 
     LATEST MEAL: {meal_macros}
