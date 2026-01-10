@@ -1,0 +1,419 @@
+import os
+from pathlib import Path
+from typing import List, Dict
+
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters  import RecursiveCharacterTextSplitter
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain.memory import ConversationSummaryMemory
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.documents import Document
+from pinecone import Pinecone, ServerlessSpec
+from dotenv import load_dotenv
+import time
+import warnings
+# Filter out the LangChainDeprecationWarning
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Load environment variables
+load_dotenv()
+
+# ==================== CONFIGURATION ====================
+
+# API Keys
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+if not PINECONE_API_KEY:
+    raise ValueError("PINECONE_API_KEY not found in environment!")
+os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
+print(f"DEBUG: Pinecone API Key first 5: {PINECONE_API_KEY[:5]}...")
+INDEX_NAME = "study-buddy-langchain"
+
+# Initialize Pinecone
+pc = Pinecone(api_key=PINECONE_API_KEY)
+INDEX_NAME = "study-buddy-langchain"
+
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0.7,
+    openai_api_key=OPENAI_API_KEY
+)
+
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+
+# ==================== CONTEXTUAL RETRIEVAL FUNCTIONS ====================
+
+def generate_context_for_document(doc: Document, doc_title: str) -> str:
+    """
+    Generate context for a document chunk using LLM
+    """
+    prompt = f"""You are helping create context for a text chunk from study materials.
+
+Document: {doc_title}
+
+Chunk content:
+{doc.page_content}
+
+Please provide a brief context (2-3 sentences) that explains:
+1. What topic or concept this chunk is about
+2. How it relates to the broader document theme
+3. Key terms or concepts mentioned
+
+Keep it concise and informative.
+
+Context:"""
+
+    try:
+        response = llm.invoke(prompt)
+        return response.content.strip()
+    except Exception as e:
+        print(f"Error generating context: {e}")
+        return f"Content from {doc_title}"
+
+def add_contextual_information(documents: List[Document], source_file: str) -> List[Document]:
+    """
+    Add contextual information to each document chunk
+    """
+    contextualized_docs = []
+    total = len(documents)
+    
+    print(f"  Generating context for {total} chunks from {source_file}...")
+    
+    for i, doc in enumerate(documents):
+        print(f"Processing chunk {i+1}/{total} (File: {source_file})")
+        
+        # Generate context
+        context = generate_context_for_document(doc, source_file)
+        
+        # Create new document with context prepended
+        contextualized_content = f"Context: {context}\n\nContent: {doc.page_content}"
+        
+        # Create new document with enhanced content and metadata
+        new_doc = Document(
+            page_content=contextualized_content,
+            metadata={
+                **doc.metadata,
+                'context': context,
+                'original_content': doc.page_content,
+                'source_file': source_file
+            }
+        )
+        
+        contextualized_docs.append(new_doc)
+    
+    print(f"Completed all {total} chunks")
+    return contextualized_docs
+
+# ==================== MAIN PIPELINE ====================
+
+def setup_pinecone_index():
+    """
+    Create or connect to Pinecone index, ensuring dimensions match requirements
+    """
+    REQUIRED_DIMENSION = 1536 # For OpenAI text-embedding-3-small
+    
+    existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+    
+    if INDEX_NAME in existing_indexes:
+        # Check current dimension
+        desc = pc.describe_index(INDEX_NAME)
+        current_dim = desc.dimension
+        
+        if current_dim != REQUIRED_DIMENSION:
+            print(f"Dimension mismatch: Index has {current_dim}, but we need {REQUIRED_DIMENSION}.")
+            print(f"Deleting and recreating index: {INDEX_NAME}")
+            pc.delete_index(INDEX_NAME)
+            # Fetch existing indexes again after deletion
+            existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+    
+    if INDEX_NAME not in existing_indexes:
+        print(f"Creating new index: {INDEX_NAME}")
+        pc.create_index(
+            name=INDEX_NAME,
+            dimension=REQUIRED_DIMENSION,  
+            metric='cosine',
+            spec=ServerlessSpec(
+                cloud='aws',
+                region='us-east-1'
+            )
+        )
+        print("Index created successfully!")
+        
+        # Wait for index to be ready
+        print("Waiting for index to be initialized...")
+        while not pc.describe_index(INDEX_NAME).status['ready']:
+            time.sleep(1)
+        print("Index is ready!")
+
+def process_single_pdf(pdf_path: str, file_type: str) -> List[Document]:
+    """
+    Process a single PDF file with contextual retrieval
+    
+    Args:
+        pdf_path: Path to PDF file
+        file_type: 'chapter' or 'notes'
+    
+    Returns:
+        List of contextualized documents
+    """
+    print(f"\nProcessing: {pdf_path}")
+    filename = Path(pdf_path).stem
+    
+    # Step 1: Load PDF
+    loader = PyPDFLoader(pdf_path)
+    pages = loader.load()
+    
+    # Step 2: Split into chunks
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=100,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""]
+    )
+    
+    chunks = text_splitter.split_documents(pages)
+    print(f"  Created {len(chunks)} chunks")
+    
+    # Step 3: Add metadata
+    for chunk in chunks:
+        chunk.metadata.update({
+            'source_file': filename,
+            'file_type': file_type,
+            'original_path': pdf_path
+        })
+    
+    # Step 4: Add contextual information (the key enhancement!)
+    contextualized_chunks = add_contextual_information(chunks, filename)
+    
+    return contextualized_chunks
+
+def process_all_pdfs(pdf_directory: str):
+    """
+    Process all PDFs and create vector store with contextual retrieval
+    """
+    pdf_dir = Path(pdf_directory)
+    pdf_files = sorted(list(pdf_dir.glob("*.pdf")))
+    
+    print(f"Found {len(pdf_files)} PDF files\n")
+    print("=" * 60)
+    
+    # Setup Pinecone
+    setup_pinecone_index()
+    
+    all_documents = []
+    
+    # Process each PDF
+    for pdf_file in pdf_files:
+        # Determine file type from filename
+        file_type = 'notes' if 'notes' in pdf_file.stem.lower() else 'chapter'
+        
+        # Process with contextual retrieval
+        docs = process_single_pdf(str(pdf_file), file_type)
+        all_documents.extend(docs)
+    
+    print("\n" + "=" * 60)
+    print(f"Total contextualized chunks: {len(all_documents)}")
+    
+    # Create vector store (automatically generates embeddings and uploads)
+    print("\nCreating vector store and uploading to Pinecone...")
+    vectorstore = PineconeVectorStore.from_documents(
+        documents=all_documents,
+        embedding=embeddings,
+        index_name=INDEX_NAME
+    )
+    
+    print("Vector store created successfully!")
+    return vectorstore, len(all_documents)
+
+# ==================== QUERY FUNCTIONS ====================
+
+def create_conversational_study_chain():
+    # Connect to index
+    vectorstore = PineconeVectorStore.from_existing_index(
+        index_name=INDEX_NAME,
+        embedding=embeddings
+    )
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+    # 1. Step to make the retriever "History Aware"
+    context_prompt = ChatPromptTemplate.from_messages([
+        ("system", "Given the summary of the chat history and the latest user question, "
+                   "formulate a standalone question which can be understood without the chat history."),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+    
+    history_aware_retriever = create_history_aware_retriever(llm, retriever, context_prompt)
+
+    # 2. Step to generate the final answer
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a helpful study buddy. Use the context below to answer. "
+                   "If the answer is not in the context, say it's not in the notes.\n\n{context}"),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ])
+    
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+    # Combine them
+    return create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+def query_study_buddy(question: str, show_sources: bool = True) -> Dict:
+    chain, retriever = create_study_buddy_qa_chain()
+    
+    # Get answer
+    answer = chain.invoke(question)
+    
+    response = {
+        'answer': answer,
+        'sources': []
+    }
+    
+    # Get source documents separately
+    if show_sources:
+        docs = retriever.invoke(question)
+        for i, doc in enumerate(docs):
+            source_info = {
+                'source_file': doc.metadata.get('source_file', 'Unknown'),
+                'file_type': doc.metadata.get('file_type', 'Unknown'),
+                'context': doc.metadata.get('context', ''),
+                'relevance_rank': i + 1
+            }
+            response['sources'].append(source_info)
+    
+    return response
+
+def interactive_study_session():
+    # Initialize Summary Memory
+    memory = ConversationSummaryMemory(
+        llm=llm, 
+        memory_key="chat_history", 
+        return_messages=True
+    )
+    
+    rag_chain = create_conversational_study_chain()
+    
+    print("\n" + "=" * 60)
+    print("STUDY BUDDY - Session with Summary Memory Active")
+    print("=" * 60)
+    print("(Type 'quit' or press Ctrl+C to exit)")
+    
+    try:
+        while True:
+            user_input = input("\nYou: ").strip()
+            
+            if user_input.lower() in ['quit', 'exit', 'q']:
+                print("\nHappy studying! Goodbye.")
+                break
+            
+            if not user_input:
+                continue
+
+            # Load history (the summary)
+            existing_history = memory.load_memory_variables({})["chat_history"]
+
+            # Get answer from the chain
+            response = rag_chain.invoke({
+                "input": user_input,
+                "chat_history": existing_history
+            })
+
+            # Save the turn to memory
+            memory.save_context({"input": user_input}, {"output": response["answer"]})
+
+            print(f"\nBuddy: {response['answer']}")
+
+    except KeyboardInterrupt:
+        # This catches Ctrl+C and exits cleanly
+        print("\n\nSession ended by user. Happy studying!")
+    except Exception as e:
+        # Catches other unexpected errors so the program doesn't just crash
+        print(f"\nAn unexpected error occurred: {e}")
+# ==================== ADVANCED FEATURES ====================
+
+def search_by_topic(topic: str, k: int = 5) -> List[Dict]:
+    """
+    Search for chunks related to a specific topic
+    """
+    vectorstore = PineconeVectorStore.from_existing_index(
+        index_name=INDEX_NAME,
+        embedding=embeddings
+    )
+    
+    docs = vectorstore.similarity_search(topic, k=k)
+    
+    results = []
+    for doc in docs:
+        results.append({
+            'content': doc.page_content,
+            'source': doc.metadata.get('source_file'),
+            'type': doc.metadata.get('file_type'),
+            'context': doc.metadata.get('context')
+        })
+    
+    return results
+
+def filter_by_source(question: str, file_type: str = None, source_file: str = None):
+    """
+    Query with filters for specific sources
+    """
+    vectorstore = PineconeVectorStore.from_existing_index(
+        index_name=INDEX_NAME,
+        embedding=embeddings
+    )
+    
+    # Build filter
+    filter_dict = {}
+    if file_type:
+        filter_dict['file_type'] = file_type
+    if source_file:
+        filter_dict['source_file'] = source_file
+    
+    retriever = vectorstore.as_retriever(
+        search_kwargs={"k": 3, "filter": filter_dict}
+    )
+    
+    # Create QA chain with filtered retriever using LCEL
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
+    
+    # Simple prompt for filtered query
+    prompt = PromptTemplate.from_template(
+        "Use the context to answer: {context}\n\nQuestion: {question}"
+    )
+    
+    chain = (
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+    
+    answer = chain.invoke(question)
+    docs = retriever.invoke(question)
+    
+    return {"result": answer, "source_documents": docs}
+
+
+# ==================== USAGE EXAMPLES ====================
+
+if __name__ == "__main__":    
+    # ========== CONVERSATIONAL STUDY SESSION ==========
+    # This now uses ConversationSummaryMemory to track your session
+    try:
+        # Check if index exists and has data
+        index_stats = pc.Index(INDEX_NAME).describe_index_stats()
+        if index_stats.get('total_vector_count', 0) == 0:
+            print("Warning: Your Pinecone index is empty. Please run the PDF processing step first.")
+        else:
+            # Start the new conversational session
+            interactive_study_session()
+    except Exception as e:
+        print(f"Error starting session: {e}")
