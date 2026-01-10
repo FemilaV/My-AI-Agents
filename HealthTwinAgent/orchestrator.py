@@ -32,7 +32,7 @@ def get_coach_advice(meal_macros, upcoming_events):
     )
     return response.choices[0].message.content
 
-# TEST DATA (Eventually these will be variables from your other scripts)
+# TEST DATA (Eventually these will be variables from other scripts)
 current_meal = {"protein": 20, "carbs": 25, "fat": 10}
 my_meetings = ["2:00 PM - Board Review (High Stress)", "3:30 PM - Project Sync"]
 
