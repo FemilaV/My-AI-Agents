@@ -265,30 +265,7 @@ def create_conversational_study_chain():
     # Combine them
     return create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-# def query_study_buddy(question: str, show_sources: bool = True) -> Dict:
-#     chain, retriever = create_study_buddy_qa_chain()
-    
-#     # Get answer
-#     answer = chain.invoke(question)
-    
-#     response = {
-#         'answer': answer,
-#         'sources': []
-#     }
-    
-#     # Get source documents separately
-#     if show_sources:
-#         docs = retriever.invoke(question)
-#         for i, doc in enumerate(docs):
-#             source_info = {
-#                 'source_file': doc.metadata.get('source_file', 'Unknown'),
-#                 'file_type': doc.metadata.get('file_type', 'Unknown'),
-#                 'context': doc.metadata.get('context', ''),
-#                 'relevance_rank': i + 1
-#             }
-#             response['sources'].append(source_info)
-    
-#     return response
+
 
 def interactive_study_session():
     # Initialize Summary Memory
